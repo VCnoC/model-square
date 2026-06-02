@@ -1,0 +1,18 @@
+{
+  "name": "model-square",
+  "version": "1.0.0",
+  "description": "模型广场 - 渠道与模型展示+管理面板",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>管理登录 · Model Square</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    body { background: radial-gradient(800px 400px at 50% 0%, rgba(99,102,241,.2), transparent 60%), #0b1020; min-height: 100vh; color-scheme: dark; }
+    .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(14px); }
+  </style>
+</head>
+<body class="text-slate-100 flex items-center justify-center px-6" x-data="loginPage()">
+  <div class="glass w-full max-w-sm rounded-2xl p-8 shadow-2xl">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 flex items-center justify-center font-bold">M</div>
+      <div>
+        <div class="font-semibold">管理员登录</div>
+        <div class="text-xs text-slate-400">Model Square Admin</div>
+      </div>
+    </div>
+
+    <form @submit.prevent="submit" class="space-y-4">
+      <div>
+        <label class="text-xs text-slate-400">密码</label>
+        <input type="password" x-model="password" autofocus
+          class="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400/50" />
+      </div>
+      <button type="submit" :disabled="loading"
+        class="w-full py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-pink-500 hover:opacity-90 transition disabled:opacity-50 font-medium">
+        <span x-show="!loading">登录</span>
+        <span x-show="loading">登录中…</span>
+      </button>
+      <div x-show="error" x-text="error" class="text-sm text-rose-400"></div>
+    </form>
+
+    <div class="mt-6 text-xs text-slate-500 text-center">
+      <a href="/" class="hover:text-slate-300">← 返回模型广场</a>
+    </div>
+  </div>
+
+<script>
+function loginPage() {
+  return {
+    password: '',
+    loading: false,
+    error: '',
+    async submit() {
+      this.loading = true; this.error = '';
+      try {
+        const r = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: this.password })
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j.error || ('登录失败 ' + r.status));
+        }
+        location.href = '/admin';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.loading = false;
+      }
+    }
+  };
+}
+</script>
+</body>
+</html>

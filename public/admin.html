@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>管理后台 · Model Square</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    body { background: #0b1020; min-height: 100vh; color-scheme: dark; }
+    .glass { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(14px); }
+    .input { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: .5rem; padding: .5rem .75rem; }
+    .input:focus { outline: none; border-color: rgba(99,102,241,.5); }
+    .btn { padding: .4rem .8rem; border-radius: .5rem; font-size: .875rem; transition: all .15s; }
+    .btn-primary { background: linear-gradient(135deg, #6366f1, #ec4899); color: white; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-ghost { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); color: #cbd5e1; }
+    .btn-ghost:hover { background: rgba(255,255,255,.1); }
+    .btn-danger { background: rgba(244,63,94,.15); border: 1px solid rgba(244,63,94,.3); color: #fda4af; }
+    .btn-danger:hover { background: rgba(244,63,94,.25); }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .875rem; }
+    th { color: #94a3b8; font-weight: 500; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+  </style>
+</head>
+<body class="text-slate-100" x-data="adminApp()" x-init="init()">
+
+  <!-- 未登录遮罩 -->
+  <template x-if="!authed && checked">
+    <div class="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur z-50">
+      <div class="glass rounded-xl p-6 text-center">
+        <div class="text-lg mb-3">未登录或已过期</div>
+        <a href="/login" class="btn btn-primary inline-block">前往登录</a>
+      </div>
+    </div>
+  </template>
+
+  <!-- 顶栏 -->
+  <header class="glass sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-pink-500 flex items-center justify-center text-sm font-bold">M</div>
+        <div class="font-semibold">Model Square · 管理后台</div>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <a href="/" target="_blank" class="btn btn-ghost">查看广场 ↗</a>
+        <button @click="logout" class="btn btn-ghost">退出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8" x-show="authed">
+
+    <!-- Tab 切换 -->
+    <div class="flex gap-2 mb-6">
+      <button @click="tab='channels'" :class="tab==='channels' ? 'bg-white text-slate-900' : 'glass text-slate-300'"
+              class="btn">渠道管理 <span class="opacity-60" x-text="`(${channels.length})`"></span></button>
+      <button @click="tab='models'" :class="tab==='models' ? 'bg-white text-slate-900' : 'glass text-slate-300'"
+              class="btn">模型管理 <span class="opacity-60" x-text="`(${models.length})`"></span></button>
+    </div>
+
+    <!-- ============ 渠道 Tab ============ -->
+    <section x-show="tab==='channels'">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">渠道列表</h2>
+        <button @click="openChannel(null)" class="btn btn-primary">+ 新建渠道</button>
+      </div>
+      <div class="glass rounded-xl overflow-hidden">
+        <table>
+          <thead><tr>
+            <th>排序</th><th>图标</th><th>渠道名</th><th>描述</th><th>颜色</th><th>模型数</th><th class="text-right">操作</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="c in channels" :key="c.id">
+              <tr class="hover:bg-white/5">
+                <td x-text="c.sort_order"></td>
+                <td class="text-xl" x-text="c.icon || '◆'"></td>
+                <td class="font-medium" x-text="c.name"></td>
+                <td class="text-slate-400 max-w-xs truncate" x-text="c.description"></td>
+                <td><span class="inline-block w-5 h-5 rounded" :style="`background:${c.color}`"></span></td>
+                <td x-text="c.model_count"></td>
+                <td class="text-right whitespace-nowrap">
+                  <button @click="openChannel(c)" class="btn btn-ghost">编辑</button>
+                  <button @click="delChannel(c)" class="btn btn-danger">删除</button>
+                </td>
+              </tr>
+            </template>
+            <template x-if="channels.length === 0">
+              <tr><td colspan="7" class="text-center text-slate-500 py-8">还没有渠道，点击右上角新建</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ 模型 Tab ============ -->
+    <section x-show="tab==='models'">
+      <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <h2 class="text-lg font-semibold">模型列表</h2>
+        <div class="flex items-center gap-2 flex-wrap">
+          <select x-model="filterChannelId" @change="reloadModels"
+                  class="input">
+            <option :value="null">全部渠道</option>
+            <template x-for="c in channels" :key="c.id">
+              <option :value="c.id" x-text="c.name"></option>
+            </template>
+          </select>
+          <input type="text" x-model="modelKeyword" placeholder="搜索模型..."
+                 class="input w-48" />
+          <button @click="openModel(null)" class="btn btn-primary" :disabled="channels.length===0">
+            + 新建模型
+          </button>
+        </div>
+      </div>
+      <div class="glass rounded-xl overflow-hidden">
+        <table>
+          <thead><tr>
+            <th>渠道</th><th>模型 ID</th><th>显示名</th><th>标签</th><th>上下文</th><th>输入价</th><th>输出价</th><th>状态</th><th class="text-right">操作</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="m in filteredModels" :key="m.id">
+              <tr class="hover:bg-white/5">
+                <td>
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs"
+                        :style="`background:${hexAlpha(channelOf(m)?.color, .15)};color:${channelOf(m)?.color}`">
+                    <span x-text="channelOf(m)?.icon || '◆'"></span>
+                    <span x-text="channelOf(m)?.name || '?'"></span>
+                  </span>
+                </td>
+                <td class="font-mono text-xs" x-text="m.name"></td>
+                <td x-text="m.display_name || '—'"></td>
+                <td>
+                  <div class="flex gap-1 flex-wrap">
+                    <template x-for="t in m.tags">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10" x-text="t"></span>
+                    </template>
+                  </div>
+                </td>
+                <td class="font-mono text-xs" x-text="formatCtx(m.context_length)"></td>
+                <td class="font-mono text-xs" x-text="m.price_input ? '$'+m.price_input : '免费'"></td>
+                <td class="font-mono text-xs" x-text="m.price_output ? '$'+m.price_output : '免费'"></td>
+                <td>
+                  <span :class="m.enabled ? 'text-emerald-400' : 'text-slate-500'"
+                        x-text="m.enabled ? '启用' : '禁用'"></span>
+                </td>
+                <td class="text-right whitespace-nowrap">
+                  <button @click="openModel(m)" class="btn btn-ghost">编辑</button>
+                  <button @click="delModel(m)" class="btn btn-danger">删除</button>
+                </td>
+              </tr>
+            </template>
+            <template x-if="filteredModels.length === 0">
+              <tr><td colspan="9" class="text-center text-slate-500 py-8">
+                <span x-show="channels.length===0">请先创建渠道</span>
+                <span x-show="channels.length>0">没有匹配的模型</span>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ 渠道编辑 Modal ============ -->
+  <div x-show="channelModal.open" x-cloak class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center px-4" @click.self="channelModal.open=false">
+    <div class="glass rounded-2xl p-6 w-full max-w-md">
+      <h3 class="text-lg font-semibold mb-4" x-text="channelModal.id ? '编辑渠道' : '新建渠道'"></h3>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-400">渠道名 *</label>
+          <input x-model="channelModal.name" class="input w-full mt-1" placeholder="如：OpenAI" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">描述</label>
+          <input x-model="channelModal.description" class="input w-full mt-1" placeholder="一句话介绍" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-slate-400">图标 (emoji)</label>
+            <input x-model="channelModal.icon" class="input w-full mt-1" placeholder="🤖" maxlength="4" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">颜色</label>
+            <input type="color" x-model="channelModal.color" class="input w-full mt-1 h-[38px]" />
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">排序值（小的在前）</label>
+          <input type="number" x-model.number="channelModal.sort_order" class="input w-full mt-1" />
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end gap-2">
+        <button @click="channelModal.open=false" class="btn btn-ghost">取消</button>
+        <button @click="saveChannel" class="btn btn-primary" :disabled="channelModal.saving">
+          <span x-show="!channelModal.saving">保存</span>
+          <span x-show="channelModal.saving">保存中...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 模型编辑 Modal ============ -->
+  <div x-show="modelModal.open" x-cloak class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center px-4" @click.self="modelModal.open=false">
+    <div class="glass rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <h3 class="text-lg font-semibold mb-4" x-text="modelModal.id ? '编辑模型' : '新建模型'"></h3>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-400">所属渠道 *</label>
+          <select x-model.number="modelModal.channel_id" class="input w-full mt-1">
+            <option :value="null" disabled>请选择</option>
+            <template x-for="c in channels" :key="c.id">
+              <option :value="c.id" x-text="c.name"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">模型 ID *（API 调用名）</label>
+          <input x-model="modelModal.name" class="input w-full mt-1 font-mono" placeholder="如：gpt-4o" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">显示名</label>
+          <input x-model="modelModal.display_name" class="input w-full mt-1" placeholder="如：GPT-4o 全能旗舰" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">描述</label>
+          <textarea x-model="modelModal.description" class="input w-full mt-1" rows="2" placeholder="模型简介"></textarea>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">标签（逗号分隔）</label>
+          <input x-model="modelModal.tagsStr" class="input w-full mt-1" placeholder="视觉,工具调用,推理" />
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs text-slate-400">上下文长度</label>
+            <input type="number" x-model.number="modelModal.context_length" class="input w-full mt-1" placeholder="128000" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">输入价 ($/M)</label>
+            <input type="number" step="0.001" x-model.number="modelModal.price_input" class="input w-full mt-1" placeholder="0" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">输出价 ($/M)</label>
+            <input type="number" step="0.001" x-model.number="modelModal.price_output" class="input w-full mt-1" placeholder="0" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-slate-400">排序值</label>
+            <input type="number" x-model.number="modelModal.sort_order" class="input w-full mt-1" />
+          </div>
+          <div class="flex items-end">
+            <label class="inline-flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" x-model="modelModal.enabled" class="w-4 h-4" />
+              <span class="text-sm">启用（公开广场可见）</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end gap-2">
+        <button @click="modelModal.open=false" class="btn btn-ghost">取消</button>
+        <button @click="saveModel" class="btn btn-primary" :disabled="modelModal.saving">
+          <span x-show="!modelModal.saving">保存</span>
+          <span x-show="modelModal.saving">保存中...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div x-show="toast" x-cloak x-transition class="fixed bottom-6 left-1/2 -translate-x-1/2 glass px-4 py-2 rounded-xl text-sm z-50" x-text="toast"></div>
+
+<script>
+function adminApp() {
+  return {
+    checked: false,
+    authed: false,
+    tab: 'channels',
+    channels: [],
+    models: [],
+    filterChannelId: null,
+    modelKeyword: '',
+    toast: '',
+    channelModal: { open:false, id:null, name:'', description:'', icon:'', color:'#3b82f6', sort_order:0, saving:false },
+    modelModal: { open:false, id:null, channel_id:null, name:'', display_name:'', description:'', tagsStr:'', context_length:0, price_input:0, price_output:0, enabled:true, sort_order:0, saving:false },
+
+    get filteredModels() {
+      const k = (this.modelKeyword || '').trim().toLowerCase();
+      let list = this.models;
+      if (this.filterChannelId) list = list.filter(m => m.channel_id === this.filterChannelId);
+      if (k) list = list.filter(m =>
+        (m.name||'').toLowerCase().includes(k) ||
+        (m.display_name||'').toLowerCase().includes(k) ||
+        (m.tags||[]).some(t => String(t).toLowerCase().includes(k))
+      );
+      return list;
+    },
+
+    channelOf(m) { return this.channels.find(c => c.id === m.channel_id); },
+
+    async init() {
+      try {
+        const r = await fetch('/api/admin/me');
+        this.authed = r.ok;
+      } catch { this.authed = false; }
+      this.checked = true;
+      if (this.authed) {
+        await this.loadAll();
+      }
+    },
+
+    async loadAll() {
+      await Promise.all([this.reloadChannels(), this.reloadModels()]);
+    },
+
+    async reloadChannels() {
+      const r = await fetch('/api/admin/channels');
+      if (r.ok) {
+        const j = await r.json();
+        this.channels = j.channels || [];
+      }
+    },
+
+    async reloadModels() {
+      const url = this.filterChannelId
+        ? `/api/admin/models?channel_id=${this.filterChannelId}`
+        : '/api/admin/models';
+      const r = await fetch(url);
+      if (r.ok) {
+        const j = await r.json();
+        this.models = j.models || [];
+      }
+    },
+
+    async logout() {
+      await fetch('/api/admin/logout', { method: 'POST' });
+      location.href = '/login';
+    },
+
+    // ---- 渠道 ----
+    openChannel(c) {
+      if (c) {
+        this.channelModal = { ...this.channelModal, ...c, open:true, saving:false };
+      } else {
+        this.channelModal = { open:true, id:null, name:'', description:'', icon:'', color:'#3b82f6', sort_order:0, saving:false };
+      }
+    },
+    async saveChannel() {
+      const m = this.channelModal;
+      if (!m.name.trim()) return this.flash('渠道名不能为空');
+      m.saving = true;
+      try {
+        const body = { name:m.name, description:m.description, icon:m.icon, color:m.color, sort_order:m.sort_order };
+        const url = m.id ? `/api/admin/channels/${m.id}` : '/api/admin/channels';
+        const method = m.id ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!r.ok) {
+          const j = await r.json().catch(()=>({}));
+          throw new Error(j.error || '保存失败');
+        }
+        this.flash('保存成功');
+        this.channelModal.open = false;
+        await this.reloadChannels();
+      } catch (e) {
+        this.flash(e.message);
+      } finally {
+        m.saving = false;
+      }
+    },
+    async delChannel(c) {
+      if (!confirm(`确定删除渠道「${c.name}」？\n该渠道下的 ${c.model_count} 个模型也会被一并删除！`)) return;
+      const r = await fetch(`/api/admin/channels/${c.id}`, { method:'DELETE' });
+      if (r.ok) {
+        this.flash('已删除');
+        await this.loadAll();
+      } else {
+        this.flash('删除失败');
+      }
+    },
+
+    // ---- 模型 ----
+    openModel(m) {
+      if (m) {
+        this.modelModal = {
+          open: true, saving: false,
+          id: m.id,
+          channel_id: m.channel_id,
+          name: m.name,
+          display_name: m.display_name,
+          description: m.description,
+          tagsStr: (m.tags || []).join(','),
+          context_length: m.context_length,
+          price_input: m.price_input,
+          price_output: m.price_output,
+          enabled: m.enabled,
+          sort_order: m.sort_order
+        };
+      } else {
+        this.modelModal = {
+          open: true, saving: false,
+          id: null,
+          channel_id: this.filterChannelId || (this.channels[0] && this.channels[0].id) || null,
+          name: '', display_name: '', description: '',
+          tagsStr: '', context_length: 0, price_input: 0, price_output: 0,
+          enabled: true, sort_order: 0
+        };
+      }
+    },
+    async saveModel() {
+      const m = this.modelModal;
+      if (!m.channel_id) return this.flash('请选择渠道');
+      if (!m.name.trim()) return this.flash('模型 ID 不能为空');
+      m.saving = true;
+      try {
+        const tags = (m.tagsStr || '').split(',').map(s => s.trim()).filter(Boolean);
+        const body = {
+          channel_id: m.channel_id, name: m.name, display_name: m.display_name,
+          description: m.description, tags, context_length: m.context_length || 0,
+          price_input: m.price_input || 0, price_output: m.price_output || 0,
+          enabled: !!m.enabled, sort_order: m.sort_order || 0
+        };
+        const url = m.id ? `/api/admin/models/${m.id}` : '/api/admin/models';
+        const method = m.id ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!r.ok) {
+          const j = await r.json().catch(()=>({}));
+          throw new Error(j.error || '保存失败');
+        }
+        this.flash('保存成功');
+        this.modelModal.open = false;
+        await Promise.all([this.reloadModels(), this.reloadChannels()]);
+      } catch (e) {
+        this.flash(e.message);
+      } finally {
+        m.saving = false;
+      }
+    },
+    async delModel(m) {
+      if (!confirm(`确定删除模型「${m.display_name || m.name}」？`)) return;
+      const r = await fetch(`/api/admin/models/${m.id}`, { method:'DELETE' });
+      if (r.ok) {
+        this.flash('已删除');
+        await Promise.all([this.reloadModels(), this.reloadChannels()]);
+      } else {
+        this.flash('删除失败');
+      }
+    },
+
+    // ---- utils ----
+    flash(msg) {
+      this.toast = msg;
+      clearTimeout(this._t);
+      this._t = setTimeout(() => this.toast = '', 1800);
+    },
+    formatCtx(n) {
+      if (!n) return '—';
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M';
+      if (n >= 1_000) return (n / 1_000).toFixed(n % 1000 === 0 ? 0 : 1) + 'K';
+      return n + '';
+    },
+    hexAlpha(hex, a) {
+      if (!hex || !hex.startsWith('#')) return `rgba(99,102,241,${a})`;
+      let h = hex.length === 4 ? '#' + [...hex.slice(1)].map(c => c+c).join('') : hex;
+      const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+      return `rgba(${r},${g},${b},${a})`;
+    }
+  };
+}
+</script>
+</body>
+</html>
