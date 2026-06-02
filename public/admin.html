@@ -164,7 +164,7 @@
 
   <!-- ============ 渠道编辑 Modal ============ -->
   <div x-show="channelModal.open" x-cloak class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center px-4" @click.self="channelModal.open=false">
-    <div class="glass rounded-2xl p-6 w-full max-w-md">
+    <div class="glass rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
       <h3 class="text-lg font-semibold mb-4" x-text="channelModal.id ? '编辑渠道' : '新建渠道'"></h3>
       <div class="space-y-3">
         <div>
@@ -189,6 +189,39 @@
           <label class="text-xs text-slate-400">排序值（小的在前）</label>
           <input type="number" x-model.number="channelModal.sort_order" class="input w-full mt-1" />
         </div>
+
+        <div class="pt-3 mt-2 border-t border-white/10">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-300 font-semibold">🔌 上游 API（用于自动拉取模型）</span>
+            <span x-show="channelModal.has_api_key" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">已保存 Key</span>
+          </div>
+          <div class="space-y-2">
+            <div>
+              <label class="text-xs text-slate-400">Base URL</label>
+              <input x-model="channelModal.base_url" class="input w-full mt-1 font-mono text-xs" placeholder="https://api.openai.com 或 https://sub.vcnovb.cn" />
+              <div class="text-[10px] text-slate-500 mt-1">最终请求 <code x-text="(channelModal.base_url||'').replace(/\/+$/,'').replace(/\/v\d+$/,'')+'/v1/models'"></code></div>
+            </div>
+            <div>
+              <label class="text-xs text-slate-400">
+                API Key
+                <span class="text-slate-500" x-show="channelModal.has_api_key">（留空保留原值）</span>
+              </label>
+              <input type="password" x-model="channelModal.api_key" class="input w-full mt-1 font-mono text-xs" placeholder="sk-..." autocomplete="new-password" />
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button type="button" @click="fetchModelsFromChannel"
+                      :disabled="channelModal.fetching || !channelModal.base_url"
+                      class="btn btn-ghost flex-1">
+                <span x-show="!channelModal.fetching">📥 拉取模型列表</span>
+                <span x-show="channelModal.fetching">拉取中...</span>
+              </button>
+              <button type="button" @click="clearChannelKey" x-show="channelModal.has_api_key" class="btn btn-danger">
+                清除 Key
+              </button>
+            </div>
+            <div x-show="channelModal.fetchError" class="text-xs text-rose-400 mt-1" x-text="channelModal.fetchError"></div>
+          </div>
+        </div>
       </div>
       <div class="mt-5 flex justify-end gap-2">
         <button @click="channelModal.open=false" class="btn btn-ghost">取消</button>
@@ -196,6 +229,73 @@
           <span x-show="!channelModal.saving">保存</span>
           <span x-show="channelModal.saving">保存中...</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 拉取模型 Modal（二级，可与渠道 Modal 共存） ============ -->
+  <div x-show="importModal.open" x-cloak class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center px-4" @click.self="importModal.open=false">
+    <div class="glass rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">
+          📦 从「<span class="text-indigo-300" x-text="importModal.channelName"></span>」拉取的模型
+        </h3>
+        <span class="text-xs text-slate-400">
+          共 <span x-text="importModal.list.length"></span> 个 ·
+          新增 <span class="text-emerald-400" x-text="importModal.list.filter(m => !m.exists).length"></span> ·
+          已存在 <span class="text-slate-500" x-text="importModal.list.filter(m => m.exists).length"></span> ·
+          已选 <span class="text-indigo-300" x-text="importModal.selected.length"></span>
+        </span>
+      </div>
+
+      <div class="flex gap-2 mb-3 flex-wrap">
+        <button @click="importSelectAll(true)" class="btn btn-ghost text-xs">全选</button>
+        <button @click="importSelectAll(false)" class="btn btn-ghost text-xs">全不选</button>
+        <button @click="importSelectOnlyNew()" class="btn btn-ghost text-xs">仅选新增</button>
+        <button @click="importInvert()" class="btn btn-ghost text-xs">反选</button>
+        <input type="text" x-model="importModal.keyword" placeholder="筛选..." class="input text-xs ml-auto w-40" />
+      </div>
+
+      <div class="flex-1 overflow-y-auto scroll-pretty border border-white/10 rounded-lg">
+        <table>
+          <thead class="sticky top-0 bg-slate-900/95">
+            <tr>
+              <th style="width:40px"></th>
+              <th>模型 ID</th>
+              <th>owned_by</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="m in filteredImportList" :key="m.name">
+              <tr class="hover:bg-white/5 cursor-pointer" @click="toggleImport(m.name)">
+                <td class="text-center">
+                  <input type="checkbox" :checked="importModal.selected.includes(m.name)" @click.stop="toggleImport(m.name)" class="w-4 h-4" />
+                </td>
+                <td class="font-mono text-xs" x-text="m.name"></td>
+                <td class="text-xs text-slate-400" x-text="m.owned_by || '—'"></td>
+                <td>
+                  <span x-show="!m.exists" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">新增</span>
+                  <span x-show="m.exists" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/15 text-slate-400">已存在</span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 flex items-center justify-between gap-2">
+        <label class="inline-flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" x-model="importModal.enabled" class="w-4 h-4" />
+          <span>导入后立即在公开广场展示</span>
+        </label>
+        <div class="flex gap-2">
+          <button @click="importModal.open=false" class="btn btn-ghost">关闭</button>
+          <button @click="doImport" :disabled="importModal.importing || importModal.selected.length===0" class="btn btn-primary">
+            <span x-show="!importModal.importing">导入选中 <span x-text="`(${importModal.selected.length})`"></span></span>
+            <span x-show="importModal.importing">导入中...</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -281,8 +381,9 @@ function adminApp() {
     filterChannelId: null,
     modelKeyword: '',
     toast: '',
-    channelModal: { open:false, id:null, name:'', description:'', icon:'', color:'#3b82f6', sort_order:0, saving:false },
+    channelModal: { open:false, id:null, name:'', description:'', icon:'', color:'#3b82f6', sort_order:0, base_url:'', api_key:'', has_api_key:false, fetching:false, fetchError:'', saving:false },
     modelModal: { open:false, id:null, channel_id:null, name:'', display_name:'', description:'', tagsStr:'', context_length:0, price_input:0, price_output:0, enabled:true, sort_order:0, saving:false },
+    importModal: { open:false, channelId:null, channelName:'', list:[], selected:[], keyword:'', enabled:true, importing:false },
 
     get filteredModels() {
       const k = (this.modelKeyword || '').trim().toLowerCase();
@@ -340,9 +441,21 @@ function adminApp() {
     // ---- 渠道 ----
     openChannel(c) {
       if (c) {
-        this.channelModal = { ...this.channelModal, ...c, open:true, saving:false };
+        this.channelModal = {
+          open: true, saving: false, fetching: false, fetchError: '',
+          id: c.id, name: c.name || '', description: c.description || '',
+          icon: c.icon || '', color: c.color || '#3b82f6',
+          sort_order: c.sort_order || 0,
+          base_url: c.base_url || '',
+          api_key: '',  // 编辑时不回填明文 key，留空＝保留原值
+          has_api_key: !!c.has_api_key
+        };
       } else {
-        this.channelModal = { open:true, id:null, name:'', description:'', icon:'', color:'#3b82f6', sort_order:0, saving:false };
+        this.channelModal = {
+          open: true, saving: false, fetching: false, fetchError: '',
+          id: null, name: '', description: '', icon: '', color: '#3b82f6', sort_order: 0,
+          base_url: '', api_key: '', has_api_key: false
+        };
       }
     },
     async saveChannel() {
@@ -350,7 +463,12 @@ function adminApp() {
       if (!m.name.trim()) return this.flash('渠道名不能为空');
       m.saving = true;
       try {
-        const body = { name:m.name, description:m.description, icon:m.icon, color:m.color, sort_order:m.sort_order };
+        const body = {
+          name: m.name, description: m.description, icon: m.icon, color: m.color,
+          base_url: m.base_url || '', sort_order: m.sort_order
+        };
+        // 仅在用户填了新 key 时才传递（避免覆盖原 key）
+        if (m.api_key && m.api_key.length > 0) body.api_key = m.api_key;
         const url = m.id ? `/api/admin/channels/${m.id}` : '/api/admin/channels';
         const method = m.id ? 'PUT' : 'POST';
         const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -365,6 +483,102 @@ function adminApp() {
         this.flash(e.message);
       } finally {
         m.saving = false;
+      }
+    },
+
+    async clearChannelKey() {
+      const m = this.channelModal;
+      if (!m.id) return;
+      if (!confirm('确定清除该渠道已保存的 API Key？')) return;
+      const r = await fetch(`/api/admin/channels/${m.id}/clear-key`, { method:'POST' });
+      if (r.ok) {
+        m.has_api_key = false;
+        this.flash('已清除');
+        await this.reloadChannels();
+      } else {
+        this.flash('清除失败');
+      }
+    },
+
+    async fetchModelsFromChannel() {
+      const m = this.channelModal;
+      if (!m.base_url) return this.flash('请先填写 Base URL');
+      // 必须先保存渠道（拿到 id）才能拉取（fetch-models 需要 channel_id）
+      if (!m.id) {
+        if (!confirm('需要先保存渠道才能拉取模型，现在保存？')) return;
+        await this.saveChannel();
+        // 保存成功会关闭 Modal，重新打开最新创建的渠道
+        await this.reloadChannels();
+        const created = this.channels.find(c => c.name === m.name);
+        if (created) this.openChannel(created);
+        else return this.flash('保存后未找到渠道，请重试');
+        return;  // 让用户再点一次「拉取」
+      }
+      m.fetching = true; m.fetchError = '';
+      try {
+        // 临时覆盖（万一用户改了字段但还没保存）
+        const body = { base_url: m.base_url };
+        if (m.api_key) body.api_key = m.api_key;
+        const r = await fetch(`/api/admin/channels/${m.id}/fetch-models`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '拉取失败');
+        this.importModal = {
+          open: true, channelId: m.id, channelName: m.name,
+          list: j.models || [], keyword: '', enabled: true, importing: false,
+          selected: (j.models || []).filter(x => !x.exists).map(x => x.name)
+        };
+        this.flash(`拉取到 ${j.total} 个，其中 ${j.new_count} 个未存在`);
+      } catch (e) {
+        m.fetchError = e.message;
+      } finally {
+        m.fetching = false;
+      }
+    },
+
+    get filteredImportList() {
+      const k = (this.importModal.keyword || '').trim().toLowerCase();
+      if (!k) return this.importModal.list;
+      return this.importModal.list.filter(m => (m.name || '').toLowerCase().includes(k));
+    },
+    toggleImport(name) {
+      const arr = this.importModal.selected;
+      const i = arr.indexOf(name);
+      if (i >= 0) arr.splice(i, 1); else arr.push(name);
+    },
+    importSelectAll(all) {
+      this.importModal.selected = all ? this.filteredImportList.map(m => m.name) : [];
+    },
+    importSelectOnlyNew() {
+      this.importModal.selected = this.importModal.list.filter(m => !m.exists).map(m => m.name);
+    },
+    importInvert() {
+      const visible = this.filteredImportList.map(m => m.name);
+      const sel = new Set(this.importModal.selected);
+      this.importModal.selected = visible.filter(n => !sel.has(n));
+    },
+    async doImport() {
+      const im = this.importModal;
+      if (im.selected.length === 0) return this.flash('请至少选一个');
+      im.importing = true;
+      try {
+        const r = await fetch(`/api/admin/channels/${im.channelId}/import-models`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ names: im.selected, enabled: im.enabled })
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '导入失败');
+        this.flash(`已导入 ${j.inserted} 个（跳过 ${j.skipped} 个已存在）`);
+        im.open = false;
+        await Promise.all([this.reloadModels(), this.reloadChannels()]);
+      } catch (e) {
+        this.flash(e.message);
+      } finally {
+        im.importing = false;
       }
     },
     async delChannel(c) {
